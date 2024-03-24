@@ -1,3 +1,4 @@
+use std::io::Error;
 use borsh::{BorshDeserialize, BorshSerialize};
 use solana_program::account_info::{AccountInfo, next_account_info};
 use solana_program::entrypoint::ProgramResult;
@@ -29,15 +30,13 @@ impl Processor {
         }
 
         // 解析account数据
-        let mut notebook_account = Notebook::try_from_slice(&account.data.borrow())?;
+        let mut notebook_account = Notebook::try_from_slice(&account.data.borrow_mut())?;
 
         // 解析指令
-        let tmp1 = HelloWorldInstruction::try_from_slice(_instruction_data);
-        msg!("tmp1: {:?}", &tmp1);
-        let tmp2 = tmp1.map_err(|_| ProgramError::InvalidInstructionData);
-        msg!("tmp2: {:?}", &tmp2);
-        let instruction = tmp2.unwrap();
-        msg!("instruction: {:?}", &instruction);
+        msg!("_instruction_data: {:?}", _instruction_data);
+        let instruction = HelloWorldInstruction::try_from_slice(_instruction_data)
+            .map_err(|_| ProgramError::InvalidInstructionData).unwrap();
+
         // Controller逻辑
         let result = match &instruction {
             HelloWorldInstruction::Init { data, owner } => {
@@ -51,10 +50,17 @@ impl Processor {
             }
         };
 
-        // // Increment and store the number of times the account has been greeted
-        // let mut notebook_account = NotebookAccount::try_from_slice(&account.data.borrow())?;
-        // notebook_account.counter += 1;
-        notebook_account.serialize(&mut &mut account.data.borrow_mut()[..])?;
+        // store data
+        // let result = Ok(());
+        // notebook_account.data = "load".to_string();
+
+        match notebook_account.serialize(&mut *account.data.borrow_mut()) {
+            Ok(_) => { msg!("notebook_account 序列化成功") }
+            Err(e) => {
+                msg!("notebook_account 序列化失败") ;
+                msg!("{}", e);
+            }
+        }
 
         result
     }
@@ -64,6 +70,7 @@ impl Processor {
 fn init(
     notebook_account: &mut Notebook, data: &String, owner: &String,
 ) -> ProgramResult {
+    msg!("Init Start");
     match is_data_length_ok(data) {
         true => {
             match notebook_account.is_init {
@@ -83,17 +90,18 @@ fn init(
 
 #[inline]
 fn write(
-    notebook_account:&mut Notebook, data: &String, owner: &String,
+    notebook_account: &mut Notebook, data: &String, owner: &String,
 ) -> ProgramResult {
+    msg!("Write Start");
     match is_data_length_ok(data) {
         true => {
-            match is_owner_ok(owner, &notebook_account){
+            match is_owner_ok(owner, &notebook_account) {
                 true => {
-                    notebook_account.data=data.clone();
+                    notebook_account.data = data.clone();
                     msg!("Write Finish: {:?}", notebook_account);
                     Ok(())
                 }
-                false => {Err(CustomError::AuthorizationErrorNoWritePermission.into())}
+                false => { Err(CustomError::AuthorizationErrorNoWritePermission.into()) }
             }
         }
         false => Err(CustomError::LengthLimitError.into())
@@ -102,7 +110,8 @@ fn write(
 
 #[inline]
 fn read(notebook_account: &Notebook) -> ProgramResult {
-    let data:String = notebook_account.data.clone();
+    msg!("Read Start");
+    let data: String = notebook_account.data.clone();
     msg!("Read Finish: {}", data);
     Ok(())
 }
