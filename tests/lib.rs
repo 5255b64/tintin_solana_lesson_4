@@ -1,6 +1,5 @@
-use borsh::BorshDeserialize;
-use helloworld::{process_instruction, GreetingAccount};
-use solana_program_test::*;
+use borsh::{BorshDeserialize, to_vec};
+use solana_program_test::{processor, ProgramTest, tokio};
 use solana_sdk::{
     account::Account,
     instruction::{AccountMeta, Instruction},
@@ -8,142 +7,191 @@ use solana_sdk::{
     signature::Signer,
     transaction::Transaction,
 };
-use std::mem;
-use solana_program::account_info::AccountInfo;
+
+use helloworld::{Notebook, process_instruction};
+use helloworld::instruction::HelloWorldInstruction;
 
 #[tokio::test]
 async fn test_helloworld() {
     let program_id = Pubkey::new_unique();
-    let greeted_pubkey = Pubkey::new_unique();
+    let notebook_pubkey = Pubkey::new_unique();
 
     let mut program_test = ProgramTest::new(
-        "helloworld", // Run the BPF version with `cargo test-bpf`
+        "SolanaHelloWorld", // Run the BPF version with `cargo test-bpf`
         program_id,
         processor!(process_instruction), // Run the native version with `cargo test`
     );
+
+    // 生成PDA(Program Derived Addresses)
+    // 将账户Account与地址 notebook_pubkey 进行绑定
     program_test.add_account(
-        greeted_pubkey,
+        notebook_pubkey,
         Account {
             lamports: 5,
-            data: vec![0_u8; mem::size_of::<u32>()],
+            // data: vec![0_u8; mem::size_of::<u32>()], // 初始化数据
+            data: to_vec::<Notebook>(&Notebook{
+                data: "".to_string(),
+                owner: "".to_string(),
+                is_init: false,
+            }).unwrap(), // 初始化数据
             owner: program_id,
             ..Account::default()
         },
     );
     let (mut banks_client, payer, recent_blockhash) = program_test.start().await;
 
-    // Verify account has zero greetings
-    let greeted_account = banks_client
-        .get_account(greeted_pubkey)
+    // get account data
+    let notebook_account = banks_client
+        .get_account(notebook_pubkey)
         .await
         .expect("get_account")
-        .expect("greeted_account not found");
+        .expect("notebook_account not found");
+
+    // println!("notebook_account: {:?}", &notebook_account);
+    // verify account data
+    // let notebook = Notebook::try_from_slice(&notebook_account.data).unwrap();
+    // println!("notebook: {:?}", &notebook);
     assert_eq!(
-        GreetingAccount::try_from_slice(&greeted_account.data)
-            .unwrap()
-            .counter,
-        0
+        Notebook::try_from_slice(&notebook_account.data).unwrap().data,
+        "".to_string(),
     );
 
-    // Greet once
+    // Init
+    println!("Start Init");
+
+
+    let data = &to_vec(&HelloWorldInstruction::Init {
+        data: "notebook init data".to_string(),
+        owner: "owner1".to_string()
+    }).unwrap();
+    println!("data: {:?}", data);
+    let data2 = HelloWorldInstruction::try_from_slice(data);
+    println!("data: {:?}", data2);
+
     let mut transaction = Transaction::new_with_payer(
         &[Instruction::new_with_bincode(
             program_id,
-            &[0], // ignored but makes the instruction unique in the slot
-            vec![AccountMeta::new(greeted_pubkey, false)],
+            &to_vec(&HelloWorldInstruction::Init {
+                data: "notebook init data".to_string(),
+                owner: "owner1".to_string()
+            }).unwrap(),
+            vec![AccountMeta::new(notebook_pubkey, false)],
         )],
         Some(&payer.pubkey()),
     );
     transaction.sign(&[&payer], recent_blockhash);
     banks_client.process_transaction(transaction).await.unwrap();
+    println!("End Init");
 
-    // Verify account has one greeting
-    let greeted_account = banks_client
-        .get_account(greeted_pubkey)
-        .await
-        .expect("get_account")
-        .expect("greeted_account not found");
+    // Verify account
     assert_eq!(
-        GreetingAccount::try_from_slice(&greeted_account.data)
-            .unwrap()
-            .counter,
-        1
+        Notebook::try_from_slice(&notebook_account.data).unwrap(),
+        Notebook {
+            data: "notebook init data".to_string(),
+            owner: "owner".to_string(),
+            is_init: true,
+        }
     );
 
-    // Greet again
+    // Read1
+    println!("Start Read");
     let mut transaction = Transaction::new_with_payer(
         &[Instruction::new_with_bincode(
             program_id,
-            &[1], // ignored but makes the instruction unique in the slot
-            vec![AccountMeta::new(greeted_pubkey, false)],
+            &to_vec(&HelloWorldInstruction::Read).unwrap(),
+            vec![AccountMeta::new(notebook_pubkey, false)],
         )],
         Some(&payer.pubkey()),
     );
     transaction.sign(&[&payer], recent_blockhash);
     banks_client.process_transaction(transaction).await.unwrap();
+    println!("End Read");
 
-    // Verify account has two greetings
-    let greeted_account = banks_client
-        .get_account(greeted_pubkey)
-        .await
-        .expect("get_account")
-        .expect("greeted_account not found");
+    // Verify account
     assert_eq!(
-        GreetingAccount::try_from_slice(&greeted_account.data)
-            .unwrap()
-            .counter,
-        2
+        Notebook::try_from_slice(&notebook_account.data).unwrap(),
+        Notebook {
+            data: "notebook init data".to_string(),
+            owner: "owner".to_string(),
+            is_init: true,
+        }
     );
-}
 
-// Sanity tests
-#[cfg(test)]
-mod test {
-    use super::*;
-    use solana_program::clock::Epoch;
-    use std::mem;
-    use helloworld::GreetingAccount;
+    // Write1
+    println!("Start Write with Correct Owner");
+    let mut transaction = Transaction::new_with_payer(
+        &[Instruction::new_with_bincode(
+            program_id,
+            &to_vec(&HelloWorldInstruction::Write {
+                data: "writing notebook data".to_string(),
+                owner: "owner1".to_string()
+            }).unwrap(),
+            vec![AccountMeta::new(notebook_pubkey, false)],
+        )],
+        Some(&payer.pubkey()),
+    );
+    transaction.sign(&[&payer], recent_blockhash);
+    banks_client.process_transaction(transaction).await.unwrap();
+    println!("End Write");
 
-    #[test]
-    fn test_sanity() {
-        let program_id = Pubkey::default();
-        let key = Pubkey::default();
-        let mut lamports = 0;
-        let mut data = vec![0; mem::size_of::<u32>()];
-        let owner = Pubkey::default();
-        let account = AccountInfo::new(
-            &key,
-            false,
-            true,
-            &mut lamports,
-            &mut data,
-            &owner,
-            false,
-            Epoch::default(),
-        );
-        let instruction_data: Vec<u8> = Vec::new();
+    // Verify account
+    assert_eq!(
+        Notebook::try_from_slice(&notebook_account.data).unwrap(),
+        Notebook {
+            data: "writing notebook data".to_string(),
+            owner: "owner".to_string(),
+            is_init: true,
+        }
+    );
 
-        let accounts = vec![account];
+    // Read2
+    println!("Start Read");
+    let mut transaction = Transaction::new_with_payer(
+        &[Instruction::new_with_bincode(
+            program_id,
+            &to_vec(&HelloWorldInstruction::Read).unwrap(),
+            vec![AccountMeta::new(notebook_pubkey, false)],
+        )],
+        Some(&payer.pubkey()),
+    );
+    transaction.sign(&[&payer], recent_blockhash);
+    banks_client.process_transaction(transaction).await.unwrap();
+    println!("End Read");
 
-        assert_eq!(
-            GreetingAccount::try_from_slice(&accounts[0].data.borrow())
-                .unwrap()
-                .counter,
-            0
-        );
-        process_instruction(&program_id, &accounts, &instruction_data).unwrap();
-        assert_eq!(
-            GreetingAccount::try_from_slice(&accounts[0].data.borrow())
-                .unwrap()
-                .counter,
-            1
-        );
-        process_instruction(&program_id, &accounts, &instruction_data).unwrap();
-        assert_eq!(
-            GreetingAccount::try_from_slice(&accounts[0].data.borrow())
-                .unwrap()
-                .counter,
-            2
-        );
-    }
+    // Verify account
+    assert_eq!(
+        Notebook::try_from_slice(&notebook_account.data).unwrap(),
+        Notebook {
+            data: "writing notebook data".to_string(),
+            owner: "owner".to_string(),
+            is_init: true,
+        }
+    );
+
+    // Write2
+    println!("Start Write with Wrong Owner");
+    let mut transaction = Transaction::new_with_payer(
+        &[Instruction::new_with_bincode(
+            program_id,
+            &to_vec(&HelloWorldInstruction::Write {
+                data: "xxxxxxxaabcabcabc123123123".to_string(),
+                owner: "owner2".to_string()
+            }).unwrap(),
+            vec![AccountMeta::new(notebook_pubkey, false)],
+        )],
+        Some(&payer.pubkey()),
+    );
+    transaction.sign(&[&payer], recent_blockhash);
+    banks_client.process_transaction(transaction).await.unwrap();
+    println!("End Write");
+
+    // Verify account
+    assert_eq!(
+        Notebook::try_from_slice(&notebook_account.data).unwrap(),
+        Notebook {
+            data: "writing notebook data".to_string(),
+            owner: "owner".to_string(),
+            is_init: true,
+        }
+    );
 }

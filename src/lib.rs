@@ -1,15 +1,14 @@
-use borsh::{BorshDeserialize, BorshSerialize};
 use solana_program::account_info::AccountInfo;
 use solana_program::entrypoint;
 use solana_program::entrypoint::ProgramResult;
 use solana_program::pubkey::Pubkey;
 use crate::processor::Processor;
 
-use crate::state::GreetingAccount;
+pub use crate::state::Notebook;
 
 mod processor;
 mod error;
-mod insruction;
+pub mod instruction;
 mod state;
 
 // Declare and export the program's entrypoint
